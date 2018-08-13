@@ -2,25 +2,27 @@
 
 这里主要是跟着这篇[博客](https://blog.qikqiak.com/post/manual-install-high-available-kubernetes-cluster/)做的，但是这篇博客是基于1.8.2的版本来的，和1.10.6有不少区别，所以再做个记录。
 
-* [环境准备](#enviroment)
-* [搭建etcd](#etcd)
-    * [安装cfssl](#cfssl)
-    * [创建ca](#ca) 
-    * [安装etcd](#etcd1) 
-* [部署flannel网络](#flanneld)
-* [部署master组件](#master) 
-    * [部署kube-apiserver](#kube-apiserver) 
-    * [部署kube-controller-manager](#kube-controller-manager) 
-    * [部署kube-scheduler](#kube-scheduler)
-* [安装kubectl](#kubectl) 
-* [部署Node节点](#node) 
-    * [部署kubelet](#kubelet) 
-    * [部署kube-proxy](#kube-proxy) 
-* [部署插件](#plug-in) 
+* [Build Enviroment](#build-enviroment)
+* [Build Etcd Cluster](#build-etcd-cluster)
+    * [Install cfssl](#install-cfssl)
+    * [build ca](#build-ca) 
+    * [install etcd](#install-etcd) 
+* [Build flannel network](#build-flannel-network)
+* [build master components](#build-master-components) 
+    * [build kube-apiserver](#build-kube-apiserver) 
+    * [build kube-controller-manager](#build-kube-controller-manager) 
+    * [build kube-scheduler](#build-kube-scheduler)
+* [build kubectl](#build-kubectl) 
+* [build node components](#build-node-components) 
+    * [install kubelet](#install-kubelet) 
+    * [install kube-proxy](#install-kube-proxy) 
+* [build plug-in](#build-plug-in) 
+    * [install coredns](#install-coredns)
+    * [install heapster](#install-heapster)
 
 
 
-### enviroment
+### Build Enviroment
 为了方便搭建目前只是用了两台虚拟机测试，ip分别是192.168.21.8和192.168.21.9， os是centos 7.4
 
 #### 组件版本
@@ -69,8 +71,8 @@
 ```
 保存为`env.sh`, 赋加可执行权限 `chmod +x env.sh`, 执行`mkdir -p /usr/k8s/bin`, 将这个目录添加到系统可执行目录里面，`export PATH=/usr/k8s/bin:$PATH`, 为了方便可以把这个命令添加到`～/.bashrc`里面， 把脚本添加到上面的目录中。 
 
-### <span id = "etcd">二、搭建etcd</span>
-#### <span id = "cfssl">2.1、安装 cfssl</span>
+### Build Etcd Cluster
+#### Install  cfssl
 kubernetes系统需要使用`TLS`证书对通信加密， 这里使用`cfssl`生成证书。
 
 ```
@@ -91,7 +93,7 @@ kubernetes系统需要使用`TLS`证书对通信加密， 这里使用`cfssl`生
  $ cfssl print-defaults csr > csr.json 
 ```
 
-#### <span id = "ca">2.2 创建CA</span>
+#### Build Ca
 修改上面创建的`config.json`文件为`ca-config.json`：
 ```
 > { 
@@ -148,7 +150,7 @@ ca-config.json  ca.csr  ca-csr.json  ca-key.pem  ca.pem
 mkdir -p /etc/kubernetes/ssl
 cp ca* /etc/kubernetes/ssl
 ```
-#### <span id = "etcd1">2.3 部署etcd 集群<span>
+#### Install Etcd
 只是测试用 所以只部署一个节点`192.168.21.8`，命名是`etcd01`：
 
 ##### 定义环境变量
@@ -269,7 +271,7 @@ https://192.168.21.8:2379 is healthy: successfully committed proposal: took = 2.
 ```
 etcd到这里就已经搭建好了，下面开始搭建flanneld网络。
 
-### <span id = "flanneld">三、部署Flannel网络<span>
+### Build Flannel Network
 
 > 需要在所有的node节点安装
 
@@ -420,7 +422,7 @@ $ etcdctl \
 /kubernetes/network/subnets/172.30.74.0-24
 ```
 
-### <span id = "master"> 四、部署master节点 </span>
+### Build Master Components
 kubernetes master 节点包含的组件有：
 + kube-apiserver
 + kube-scheduler
@@ -484,7 +486,7 @@ kubernetes.csr  kubernetes-csr.json  kubernetes-key.pem  kubernetes.pem
 $ mkdir -p /etc/kubernetes/ssl/
 $ mv kubernetes*.pem /etc/kubernetes/ssl/
 ```
-#### <span id="kube-apiserver"> 4.1 kube-apiserver组件 </span>
+#### Build Kube-apiserver
 ##### 创建kube-apiserver 使用的客户端token 文件
 kubelet 首次启动时向kube-apiserver 发送TLS Bootstrapping 请求，kube-apiserver 验证请求中的token 是否与它配置的token.csv 一致，如果一致则自动为kubelet 生成证书和密钥。
 ```
@@ -625,7 +627,7 @@ $ systemctl enable kube-apiserver
 $ systemctl start kube-apiserver
 $ systemctl status kube-apiserver
 ```
-#### <span id="kube-controller-manager"> 4.2 kube-controller-manager组件 </span>
+#### Build Kube-controller-manager
 ##### 创建kube-controller-manager 的systemd unit 文件
 ```
 $ cat > kube-controller-manager.service <<EOF
@@ -662,7 +664,7 @@ $ systemctl enable kube-controller-manager
 $ systemctl start kube-controller-manager
 $ systemctl status kube-controller-manager
 ```
-#### <span id="kube-scheduler"> 4.3 kube-scheduler组件 </span>
+#### Build Kube-scheduler
 ##### 创建kube-scheduler 的systemd unit 文件
 ```
 $ cat > kube-scheduler.service <<EOF
@@ -691,7 +693,7 @@ $ systemctl enable kube-scheduler
 $ systemctl start kube-scheduler
 $ systemctl status kube-scheduler
 ```
-### <span id="kubectl"> 五、配置kubectl命令行工具 </span>
+### Build Kubectl
 kubectl默认从`~/.kube/config`配置文件中获取访问kube-apiserver 地址、证书、用户名等信息，需要正确配置该文件才能正常使用kubectl命令。
 
 #### 环境变量
@@ -769,7 +771,7 @@ controller-manager   Healthy   ok
 scheduler            Healthy   ok
 etcd-0               Healthy   {"health":"true"}
 ```
-### <span id="node"> 六、部署Node节点 </span>
+### Build Node Components
 kubernetes Node 节点包含如下组件：
 + flanneld
 + docker
@@ -847,7 +849,7 @@ $ sudo systemctl enable docker
 $ sudo systemctl start docker
 ```
 
-#### <span id="kubelet"> 6.1 安装和配置kubelet </span>
+#### Install Kubelet
 
 kubelet 启动时向kube-apiserver 发送TLS bootstrapping 请求，需要先将bootstrap token 文件中的kubelet-bootstrap 用户赋予system:node-bootstrapper 角色，然后kubelet 才有权限创建认证请求(certificatesigningrequests)：
 
@@ -951,7 +953,7 @@ $ ls -l /etc/kubernetes/ssl/kubelet*
 -rw-r--r-- 1 root root 1115 Nov  7 10:16 /etc/kubernetes/ssl/kubelet.crt
 -rw------- 1 root root 1675 Nov  7 10:16 /etc/kubernetes/ssl/kubelet.key
 ```
-#### <span id="kube-proxy">6.2 配置kube-proxy </span>
+#### Install Kube-proxy 
 ##### 创建kube-proxy 证书签名请求：
 ```
 $ cat > kube-proxy-csr.json <<EOF
@@ -1097,8 +1099,8 @@ NAME         TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)        AGE
 nginx-ds     NodePort    10.0.0.169   <none>        80:30265/TCP   24m
 ```
 
-### <span id="plug-in">七、部署插件</span>
-#### <span id="coredns">7.1 部署coreDNS<span>
+### Build Plug-in
+#### Install Coredns
 CoreDNS 给出了标准的 deployment 配置，如下
 + coredns.yaml.sed
 
@@ -1260,7 +1262,7 @@ spec:
 ```
 kubectl create -f coredns.yaml
 ```
-#### <span id="coredns">7.2 heapster<span>
+#### Install Heapster 
 yaml 创建一下就可以了
 ```
 kubectl create -f https://raw.githubusercontent.com/kubernetes/heapster/master/deploy/kube-config/influxdb/grafana.yaml
