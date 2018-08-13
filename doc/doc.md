@@ -72,7 +72,7 @@
 保存为`env.sh`, 赋加可执行权限 `chmod +x env.sh`, 执行`mkdir -p /usr/k8s/bin`, 将这个目录添加到系统可执行目录里面，`export PATH=/usr/k8s/bin:$PATH`, 为了方便可以把这个命令添加到`～/.bashrc`里面， 把脚本添加到上面的目录中。 
 
 ### Build Etcd Cluster
-#### Install  cfssl
+#### Install Cfssl
 kubernetes系统需要使用`TLS`证书对通信加密， 这里使用`cfssl`生成证书。
 
 ```
