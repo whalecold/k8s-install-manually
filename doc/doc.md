@@ -2,25 +2,25 @@
 
 这里主要是跟着这篇[博客](https://blog.qikqiak.com/post/manual-install-high-available-kubernetes-cluster/)做的，但是这篇博客是基于1.8.2的版本来的，和1.10.6有不少区别，所以再做个记录。
 
->- [环境准备](#anchor)
->- [搭建etcd](#etcd)</br>
->&emsp;[安装cfssl](#cfssl)</br>
->&emsp;[创建ca](#ca)</br>
->&emsp;[安装etcd](#etcd1)</br>
->- [部署flannel网络](#flanneld)
->- [部署master组件](#master)</br>
->&emsp;[部署kube-apiserver](#kube-apiserver)</br>
->&emsp;[部署kube-controller-manager](#kube-controller-manager)</br>
->&emsp;[部署kube-scheduler](#kube-scheduler)
->- [安装kubectl](#kubectl)</br>
->- [部署Node节点](#node)</br>
-&emsp;[部署kubelet](#kubelet)</br>
-&emsp;[部署kube-proxy](#kube-proxy)</br>
->- [部署插件](#plug-in)</br>
+* [环境准备](#enviroment)
+* [搭建etcd](#etcd)
+    * [安装cfssl](#cfssl)
+    * [创建ca](#ca) 
+    * [安装etcd](#etcd1) 
+* [部署flannel网络](#flanneld)
+* [部署master组件](#master) 
+    * [部署kube-apiserver](#kube-apiserver) 
+    * [部署kube-controller-manager](#kube-controller-manager) 
+    * [部署kube-scheduler](#kube-scheduler)
+* [安装kubectl](#kubectl) 
+* [部署Node节点](#node) 
+    * [部署kubelet](#kubelet) 
+    * [部署kube-proxy](#kube-proxy) 
+* [部署插件](#plug-in) 
 
 
 
-### <span id = "anchor">一、环境准备</span>
+### enviroment
 为了方便搭建目前只是用了两台虚拟机测试，ip分别是192.168.21.8和192.168.21.9， os是centos 7.4
 
 #### 组件版本
