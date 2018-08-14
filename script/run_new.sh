@@ -1,7 +1,10 @@
 #!/bin/bash
 
-./para_config.sh
-./install_tool.sh
+./para_config.sh $1
+
+#./install_tool.sh
+export PATH=/usr/k8s/bin:$PATH
+source ./etcd_env.sh
 ./gen-ssl.sh
-./etcd_env.sh
+./gen_etcd.sh
 ./etcd_service.sh
