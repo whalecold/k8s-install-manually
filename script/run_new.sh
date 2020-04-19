@@ -7,4 +7,4 @@ export PATH=/usr/k8s/bin:$PATH
 source ./env/etcd_env.sh
 ./gen-ssl.sh
 ./gen_etcd.sh
-./etcd_service.sh
+./service/etcd_service.sh
