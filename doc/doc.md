@@ -1,102 +1,115 @@
+---
+title: kubernetes 搭建
+subtitle: Making a Note
+date: 2018-09-26
+categories: [
+    "kubernetes",
+]
+tags: ["golang", "kubernetes"]
+---
+
+一个简单的 kubernetes 集群搭建教程
+<!--more-->
+
 ## kubernetes v1.10.6 搭建手记
 
-这里主要是跟着这篇[博客](https://blog.qikqiak.com/post/manual-install-high-available-kubernetes-cluster/)做的，但是这篇博客是基于1.8.2的版本来的，和1.10.6有不少区别，所以再做个记录。
+这里主要是跟着这篇 [博客](https://blog.qikqiak.com/post/manual-install-high-available-kubernetes-cluster/) 做的，但是这篇博客是基于 1.8.2 的版本来的，和 1.10.6 有不少区别，所以再做个记录。
 
 * [Build Enviroment](#build-enviroment)
 * [Build Etcd Cluster](#build-etcd-cluster)
     * [Install cfssl](#install-cfssl)
-    * [build ca](#build-ca) 
-    * [install etcd](#install-etcd) 
+    * [build ca](#build-ca)
+    * [install etcd](#install-etcd)
 * [Build flannel network](#build-flannel-network)
-* [build master components](#build-master-components) 
-    * [build kube-apiserver](#build-kube-apiserver) 
-    * [build kube-controller-manager](#build-kube-controller-manager) 
+* [build master components](#build-master-components)
+    * [build kube-apiserver](#build-kube-apiserver)
+    * [build kube-controller-manager](#build-kube-controller-manager)
     * [build kube-scheduler](#build-kube-scheduler)
-* [build kubectl](#build-kubectl) 
-* [build node components](#build-node-components) 
-    * [install kubelet](#install-kubelet) 
-    * [install kube-proxy](#install-kube-proxy) 
-* [build plug-in](#build-plug-in) 
+* [build kubectl](#build-kubectl)
+* [build node components](#build-node-components)
+    * [install kubelet](#install-kubelet)
+    * [install kube-proxy](#install-kube-proxy)
+* [build plug-in](#build-plug-in)
     * [install coredns](#install-coredns)
     * [install heapster](#install-heapster)
 
 
 
 ### Build Enviroment
-为了方便搭建目前只是用了两台虚拟机测试，ip分别是192.168.21.8和192.168.21.9， os是centos 7.4
+为了方便搭建目前只是用了两台虚拟机测试，ip 分别是 192.168.21.8 和 192.168.21.9， os 是 centos 7.4
 
 #### 组件版本
 
 + Kubernetes 1.10.6
-+ Docker 17.03.1-ce (最新的对container-selinux版本有要求)
++ Docker 17.03.1-ce (最新的对 container-selinux 版本有要求)
 + Etcd 3.3.9
 + Flanneld
-+ TLS认证通信（所有组件，如etcd、kubernetes master 和node）
-+ kubedns、dashboard、heapster等插件
++ TLS 认证通信（所有组件，如 etcd、kubernetes master 和 node）
++ kubedns、dashboard、heapster 等插件
 
 #### 自己先设置好环境变量
 
 后面的署将会使用到下面的变量，定义如下（根据自己的机器、网络修改）：
 ```
- #TLS Bootstrapping 使用的Token，可以使用命令 head -c 16 /dev/urandom | od -An -t x  > tr -d ' ' 生成
+ #TLS Bootstrapping 使用的 Token，可以使用命令 head -c 16 /dev/urandom | od -An -t x  > tr -d ' ' 生成
  BOOTSTRAP_TOKEN="8981b594122ebed7596f1d3b69c78223"
- 
- #建议使用未用的网段来定义服务网段和Pod 网段
- #服务网段(Service CIDR)，部署前路由不可达，部署后集群内部使用IP:Port可达
+
+ #建议使用未用的网段来定义服务网段和 Pod 网段
+ #服务网段 (Service CIDR)，部署前路由不可达，部署后集群内部使用 IP:Port 可达
  SERVICE_CIDR="10.254.0.0/16"
- 
- #Pod 网段(Cluster CIDR)，部署前路由不可达，部署后路由可达(flanneld 保证)
+
+ #Pod 网段 (Cluster CIDR)，部署前路由不可达，部署后路由可达 (flanneld 保证)
  CLUSTER_CIDR="172.30.0.0/16"
- 
- #服务端口范围(NodePort Range)
+
+ #服务端口范围 (NodePort Range)
  NODE_PORT_RANGE="30000-32766"
- 
- #etcd集群服务地址列表 这里暂时先只有一台
+
+ #etcd 集群服务地址列表 这里暂时先只有一台
  ETCD_ENDPOINTS="https://192.168.31.8:2379"
- 
+
  #flanneld 网络配置前缀
  FLANNEL_ETCD_PREFIX="/kubernetes/network"
- 
- #kubernetes 服务IP(预先分配，一般为SERVICE_CIDR中的第一个IP)
+
+ #kubernetes 服务 IP(预先分配，一般为 SERVICE_CIDR 中的第一个 IP)
  CLUSTER_KUBERNETES_SVC_IP="10.254.0.1"
- 
- #集群 DNS 服务IP(从SERVICE_CIDR 中预先分配)
+
+ #集群 DNS 服务 IP(从 SERVICE_CIDR 中预先分配)
  CLUSTER_DNS_SVC_IP="10.254.0.2"
- 
+
  #集群 DNS 域名
  CLUSTER_DNS_DOMAIN="cluster.local."
- 
+
  #MASTER API Server 地址
  MASTER_URL="k8s-api.virtual.local"
 ```
-保存为`env.sh`, 赋加可执行权限 `chmod +x env.sh`, 执行`mkdir -p /usr/k8s/bin`, 将这个目录添加到系统可执行目录里面，`export PATH=/usr/k8s/bin:$PATH`, 为了方便可以把这个命令添加到`～/.bashrc`里面， 把脚本添加到上面的目录中。 
+保存为 `env.sh`, 赋加可执行权限 `chmod +x env.sh`, 执行 `mkdir -p /usr/k8s/bin`, 将这个目录添加到系统可执行目录里面，`export PATH=/usr/k8s/bin:$PATH`, 为了方便可以把这个命令添加到 `～/.bashrc` 里面， 把脚本添加到上面的目录中。
 
 ### Build Etcd Cluster
 #### Install Cfssl
-kubernetes系统需要使用`TLS`证书对通信加密， 这里使用`cfssl`生成证书。
+kubernetes 系统需要使用 `TLS` 证书对通信加密， 这里使用 `cfssl` 生成证书。
 
 ```
  $ wget https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
  $ chmod +x cfssl_linux-amd64
  $ mv cfssl_linux-amd64 /usr/k8s/bin/cfssl
- 
- $ wget https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64 
- $ chmod +x cfssljson_linux-amd64 
- $ mv cfssljson_linux-amd64 /usr/k8s/bin/cfssljson 
- 
- $ wget https://pkg.cfssl.org/R1.2/cfssl-certinfo_linux-amd64 
- $ chmod +x cfssl-certinfo_linux-amd64 
- $ mv cfssl-certinfo_linux-amd64 /usr/k8s/bin/cfssl-certinfo 
- 
- $ mkdir ssl && cd ssl 
- $ cfssl print-defaults config > config.json 
- $ cfssl print-defaults csr > csr.json 
+
+ $ wget https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+ $ chmod +x cfssljson_linux-amd64
+ $ mv cfssljson_linux-amd64 /usr/k8s/bin/cfssljson
+
+ $ wget https://pkg.cfssl.org/R1.2/cfssl-certinfo_linux-amd64
+ $ chmod +x cfssl-certinfo_linux-amd64
+ $ mv cfssl-certinfo_linux-amd64 /usr/k8s/bin/cfssl-certinfo
+
+ $ mkdir ssl && cd ssl
+ $ cfssl print-defaults config > config.json
+ $ cfssl print-defaults csr > csr.json
 ```
 
 #### Build Ca
-修改上面创建的`config.json`文件为`ca-config.json`：
+修改上面创建的 `config.json` 文件为 `ca-config.json`：
 ```
-> { 
+> {
 >     "signing": {
 >         "default": {
 >             "expiry": "87600h"
@@ -115,12 +128,12 @@ kubernetes系统需要使用`TLS`证书对通信加密， 这里使用`cfssl`生
 >     }
 > }
 ```
-+ `config.json`：可以定义多个profiles，分别指定不同的过期时间、使用场景等参数；后续在签名证书时使用某个profile。
-+ `signing`: 表示该证书可用于签名其它证书；生成的ca.pem 证书中CA=TRUE。
-+ `server auth`: 表示client 可以用该CA 对server 提供的证书进行校验。
-+ `client auth`: 表示server 可以用该CA 对client 提供的证书进行验证。
++ `config.json`：可以定义多个 profiles，分别指定不同的过期时间、使用场景等参数；后续在签名证书时使用某个 profile。
++ `signing`: 表示该证书可用于签名其它证书；生成的 ca.pem 证书中 CA=TRUE。
++ `server auth`: 表示 client 可以用该 CA 对 server 提供的证书进行校验。
++ `client auth`: 表示 server 可以用该 CA 对 client 提供的证书进行验证。
 
-修改CA 证书签名请求为`ca-csr.json`：
+修改 CA 证书签名请求为 `ca-csr.json`：
 ```
 {
     "CN": "kubernetes",
@@ -139,35 +152,35 @@ kubernetes系统需要使用`TLS`证书对通信加密， 这里使用`cfssl`生
     ]
 }
 ```
-生成CA 证书和私钥：
+生成 CA 证书和私钥：
 ```
 cfssl gencert -initca ca-csr.json | cfssljson -bare ca
 ls ca*
 ca-config.json  ca.csr  ca-csr.json  ca-key.pem  ca.pem
 ```
-将生成的CA 证书、密钥文件、配置文件拷贝到所有机器的/etc/kubernetes/ssl目录下面：
+将生成的 CA 证书、密钥文件、配置文件拷贝到所有机器的 / etc/kubernetes/ssl 目录下面：
 ```
 mkdir -p /etc/kubernetes/ssl
 cp ca* /etc/kubernetes/ssl
 ```
 #### Install Etcd
-只是测试用 所以只部署一个节点`192.168.21.8`，命名是`etcd01`：
+只是测试用 所以只部署一个节点 `192.168.21.8`，命名是 `etcd01`：
 
 ##### 定义环境变量
 ```
-$ export NODE_NAME=etcd01 # 当前部署的机器名称(随便定义，只要能区分不同机器即可)
-$ export NODE_IP=192.168.21.8 # 当前部署的机器IP
+$ export NODE_NAME=etcd01 # 当前部署的机器名称 (随便定义，只要能区分不同机器即可)
+$ export NODE_IP=192.168.21.8 # 当前部署的机器 IP
 $ export NODE_IPS="192.168.21.8" # etcd 集群所有机器 IP
-$ # etcd 集群间通信的IP和端口
+$ # etcd 集群间通信的 IP 和端口
 $ export ETCD_NODES=etcd01=https://192.168.21.8:2380
 $ # 导入用到的其它全局变量：ETCD_ENDPOINTS、FLANNEL_ETCD_PREFIX、CLUSTER_CIDR
 $ source /usr/k8s/bin/env.sh
 ```
-##### 下载etcd二进制文件
-自己去[github](https://github.com/coreos/etcd/releases)去下载找到对应版本就好了
+##### 下载 etcd 二进制文件
+自己去 [github](https://github.com/coreos/etcd/releases) 去下载找到对应版本就好了
 
-##### 创建TLS 密钥和证书
-创建etcd 证书签名请求：
+##### 创建 TLS 密钥和证书
+创建 etcd 证书签名请求：
 ```
 $ cat > etcd-csr.json <<EOF
 {
@@ -194,7 +207,7 @@ EOF
 ```
 + `NODE_IP` 即上面的全局变量
 
-生成etcd证书和私钥：
+生成 etcd 证书和私钥：
 ```
 $ cfssl gencert -ca=/etc/kubernetes/ssl/ca.pem \
   -ca-key=/etc/kubernetes/ssl/ca-key.pem \
@@ -206,7 +219,7 @@ $  mkdir -p /etc/etcd/ssl
 $  mv etcd*.pem /etc/etcd/ssl/
 ```
 
-创建etcd 的systemd unit 文件
+创建 etcd 的 systemd unit 文件
 
 ```
 $ mkdir -p /var/lib/etcd  # 必须要先创建工作目录
@@ -246,7 +259,7 @@ WantedBy=multi-user.target
 EOF
 ```
 
-启动etcd 服务
+启动 etcd 服务
 
 ```
 mv etcd.service /etc/systemd/system/
@@ -269,22 +282,22 @@ for ip in ${NODE_IPS}; do
 ```
 https://192.168.21.8:2379 is healthy: successfully committed proposal: took = 2.132456ms
 ```
-etcd到这里就已经搭建好了，下面开始搭建flanneld网络。
+etcd 到这里就已经搭建好了，下面开始搭建 flanneld 网络。
 
 ### Build Flannel Network
 
-> 需要在所有的node节点安装
+> 需要在所有的 node 节点安装
 
 ##### 环境变量
 ```
-$ export NODE_IP=192.168.21.8  # 当前部署节点的IP
+$ export NODE_IP=192.168.21.8  # 当前部署节点的 IP
 # 导入全局变量
 $ source /usr/k8s/bin/env.sh
 ```
-##### 创建TLS 密钥和证书
-etcd 集群启用了双向TLS 认证，所以需要为flanneld 指定与etcd 集群通信的CA 和密钥。
+##### 创建 TLS 密钥和证书
+etcd 集群启用了双向 TLS 认证，所以需要为 flanneld 指定与 etcd 集群通信的 CA 和密钥。
 
-创建flanneld 证书签名请求：
+创建 flanneld 证书签名请求：
 ```
 $ cat > flanneld-csr.json <<EOF
 {
@@ -306,7 +319,7 @@ $ cat > flanneld-csr.json <<EOF
 }
 EOF
 ```
-生成flanneld 证书和私钥：
+生成 flanneld 证书和私钥：
 ```
 $ cfssl gencert -ca=/etc/kubernetes/ssl/ca.pem \
   -ca-key=/etc/kubernetes/ssl/ca-key.pem \
@@ -318,23 +331,23 @@ $ sudo mkdir -p /etc/flanneld/ssl
 $ sudo mv flanneld*.pem /etc/flanneld/ssl
 ```
 
-##### 向etcd 写入集群Pod 网段信息
->该步骤只需在第一次部署Flannel 网络时执行，后续在其他节点上部署Flanneld 时无需再写入该信息
+##### 向 etcd 写入集群 Pod 网段信息
+> 该步骤只需在第一次部署 Flannel 网络时执行，后续在其他节点上部署 Flanneld 时无需再写入该信息
 ```
 $ etcdctl \
   --endpoints=${ETCD_ENDPOINTS} \
   --ca-file=/etc/kubernetes/ssl/ca.pem \
   --cert-file=/etc/flanneld/ssl/flanneld.pem \
   --key-file=/etc/flanneld/ssl/flanneld-key.pem \
-  set ${FLANNEL_ETCD_PREFIX}/config '{"Network":"'${CLUSTER_CIDR}'", "SubnetLen": 24, "Backend": {"Type": "vxlan"}}'
+  set ${FLANNEL_ETCD_PREFIX}/config '{"Network":"'${CLUSTER_CIDR}'","SubnetLen": 24,"Backend": {"Type":"vxlan"}}'
 # 得到如下反馈信息
 {"Network":"172.30.0.0/16", "SubnetLen": 24, "Backend": {"Type": "vxlan"}}
 ```
-+ 写入的 Pod 网段(${CLUSTER_CIDR}，172.30.0.0/16) 必须与kube-controller-manager 的 --cluster-cidr 选项值一致；
++ 写入的 Pod 网段 (${CLUSTER_CIDR}，172.30.0.0/16) 必须与 kube-controller-manager 的 --cluster-cidr 选项值一致；
 
-##### 安装和配置flanneld
+##### 安装和配置 flanneld
 
-先去[flanneld release](https://github.com/coreos/flannel/releases)页面下载最新版的flanneld 二进制文件。
+先去 [flanneld release](https://github.com/coreos/flannel/releases) 页面下载最新版的 flanneld 二进制文件。
 ```
 $ mkdir flannel
 $ wget https://github.com/coreos/flannel/releases/download/v0.9.0/flannel-v0.9.0-linux-amd64.tar.gz
@@ -342,7 +355,7 @@ $ tar -xzvf flannel-v0.9.0-linux-amd64.tar.gz -C flannel
 $ cp flannel/{flanneld,mk-docker-opts.sh} /usr/k8s/bin
 ```
 
-创建flanneld的systemd unit 文件
+创建 flanneld 的 systemd unit 文件
 ```
 $ cat > flanneld.service << EOF
 [Unit]
@@ -369,7 +382,7 @@ WantedBy=multi-user.target
 RequiredBy=docker.service
 EOF
 ```
-启动flanneld
+启动 flanneld
 ```
 $ cp flanneld.service /etc/systemd/system/
 $ systemctl daemon-reload
@@ -380,17 +393,17 @@ $ systemctl status flanneld
 
 检查服务命令：`ifconfig flannel.1`
 
-检查分配给各flanneld 的Pod 网段信息
+检查分配给各 flanneld 的 Pod 网段信息
 ```
-$ # 查看集群 Pod 网段(/16)
+$ # 查看集群 Pod 网段 (/16)
 $ etcdctl \
   --endpoints=${ETCD_ENDPOINTS} \
   --ca-file=/etc/kubernetes/ssl/ca.pem \
   --cert-file=/etc/flanneld/ssl/flanneld.pem \
   --key-file=/etc/flanneld/ssl/flanneld-key.pem \
   get ${FLANNEL_ETCD_PREFIX}/config
-{ "Network": "172.30.0.0/16", "SubnetLen": 24, "Backend": { "Type": "vxlan" } }
-$ # 查看已分配的 Pod 子网段列表(/24)
+{"Network": "172.30.0.0/16", "SubnetLen": 24, "Backend": { "Type": "vxlan"} }
+$ # 查看已分配的 Pod 子网段列表 (/24)
 $ etcdctl \
   --endpoints=${ETCD_ENDPOINTS} \
   --ca-file=/etc/kubernetes/ssl/ca.pem \
@@ -407,8 +420,8 @@ $ etcdctl \
   get ${FLANNEL_ETCD_PREFIX}/subnets/172.30.77.0-24
 {"PublicIP":"192.168.1.137","BackendType":"vxlan","BackendData":{"VtepMAC":"62:fc:03:83:1b:2b"}}
 ```
-确保各节点间Pod 网段能互联互通
-在各个节点部署完Flanneld 后，查看已分配的Pod 子网段列表：
+确保各节点间 Pod 网段能互联互通
+在各个节点部署完 Flanneld 后，查看已分配的 Pod 子网段列表：
 
 ```
 $ etcdctl \
@@ -429,21 +442,21 @@ kubernetes master 节点包含的组件有：
 + kube-controller-manager
 
 这三个组件需要在一台机器上面。</br>
-master 节点与node 节点上的Pods 通过Pod 网络通信，所以需要在master 节点上部署Flannel 网络。
+master 节点与 node 节点上的 Pods 通过 Pod 网络通信，所以需要在 master 节点上部署 Flannel 网络。
 #### 环境变量
 ```
-$ export NODE_IP=192.168.21.8  # 当前部署的master 机器IP
+$ export NODE_IP=192.168.21.8  # 当前部署的 master 机器 IP
 $ source /usr/k8s/bin/env.sh
 ```
 #### 下载对应版本的二进制文件：
-在[kubernetes changelog](https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.10.md#server-binaries)页面下载最新版本的文件:
+在 [kubernetes changelog](https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.10.md#server-binaries) 页面下载最新版本的文件:
 ```
 $ wget https://storage.googleapis.com/kubernetes-release/release/v1.10.6/kubernetes-server-linux-amd64.tar.gz
 $ tar -xzvf kubernetes-server-linux-amd64.tar.gz
 ```
-然后将里面的二进制文件拷贝到`/usr/k8s/bin`目录里面
-#### 创建kubernetes 证书
-创建kubernetes 证书签名请求：
+然后将里面的二进制文件拷贝到 `/usr/k8s/bin` 目录里面
+#### 创建 kubernetes 证书
+创建 kubernetes 证书签名请求：
 ```
 $ cat > kubernetes-csr.json <<EOF
 {
@@ -475,7 +488,7 @@ $ cat > kubernetes-csr.json <<EOF
 }
 EOF
 ```
-生成kubernetes 证书和私钥：
+生成 kubernetes 证书和私钥：
 ```
 $ cfssl gencert -ca=/etc/kubernetes/ssl/ca.pem \
   -ca-key=/etc/kubernetes/ssl/ca-key.pem \
@@ -487,8 +500,8 @@ $ mkdir -p /etc/kubernetes/ssl/
 $ mv kubernetes*.pem /etc/kubernetes/ssl/
 ```
 #### Build Kube-apiserver
-##### 创建kube-apiserver 使用的客户端token 文件
-kubelet 首次启动时向kube-apiserver 发送TLS Bootstrapping 请求，kube-apiserver 验证请求中的token 是否与它配置的token.csv 一致，如果一致则自动为kubelet 生成证书和密钥。
+##### 创建 kube-apiserver 使用的客户端 token 文件
+kubelet 首次启动时向 kube-apiserver 发送 TLS Bootstrapping 请求，kube-apiserver 验证请求中的 token 是否与它配置的 token.csv 一致，如果一致则自动为 kubelet 生成证书和密钥。
 ```
 $ # 导入的 environment.sh 文件定义了 BOOTSTRAP_TOKEN 变量
 $ cat > token.csv <<EOF
@@ -496,8 +509,8 @@ ${BOOTSTRAP_TOKEN},kubelet-bootstrap,10001,"system:kubelet-bootstrap"
 EOF
 $ mv token.csv /etc/kubernetes/
 ```
-##### 创建kube-apiserver 的systemd unit文件
-在创建之前需要先生成一个日志策略文件(`/etc/kubernetes/audit-policy.yaml`):
+##### 创建 kube-apiserver 的 systemd unit 文件
+在创建之前需要先生成一个日志策略文件 (`/etc/kubernetes/audit-policy.yaml`):
 ```
 apiVersion: audit.k8s.io/v1beta1 # This is required.
 kind: Policy
@@ -518,14 +531,14 @@ rules:
     - group: ""
       resources: ["pods/log", "pods/status"]
 
-  # Don't log requests to a configmap called "controller-leader"
+  # Don't log requests to a configmap called"controller-leader"
   - level: None
     resources:
     - group: ""
       resources: ["configmaps"]
       resourceNames: ["controller-leader"]
 
-  # Don't log watch requests by the "system:kube-proxy" on endpoints or services
+  # Don't log watch requests by the"system:kube-proxy" on endpoints or services
   - level: None
     users: ["system:kube-proxy"]
     verbs: ["watch"]
@@ -568,9 +581,9 @@ rules:
     omitStages:
       - "RequestReceived"
 ```
-审查日志的相关配置可以查看[文档了解](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/)
+审查日志的相关配置可以查看 [文档了解](https://kubernetes.io/docs/tasks/debug-application-cluster/audit/)
 
-下面是unit文件:
+下面是 unit 文件:
 ```
 $ cat  > kube-apiserver.service <<EOF
 [Unit]
@@ -619,7 +632,7 @@ WantedBy=multi-user.target
 EOF
 ```
 
-##### 启动kube-apiserver
+##### 启动 kube-apiserver
 ```
 $ cp kube-apiserver.service /etc/systemd/system/
 $ systemctl daemon-reload
@@ -628,7 +641,7 @@ $ systemctl start kube-apiserver
 $ systemctl status kube-apiserver
 ```
 #### Build Kube-controller-manager
-##### 创建kube-controller-manager 的systemd unit 文件
+##### 创建 kube-controller-manager 的 systemd unit 文件
 ```
 $ cat > kube-controller-manager.service <<EOF
 [Unit]
@@ -656,7 +669,7 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 ```
-##### 启动kube-controller-manager
+##### 启动 kube-controller-manager
 ```
 $ cp kube-controller-manager.service /etc/systemd/system/
 $ systemctl daemon-reload
@@ -665,7 +678,7 @@ $ systemctl start kube-controller-manager
 $ systemctl status kube-controller-manager
 ```
 #### Build Kube-scheduler
-##### 创建kube-scheduler 的systemd unit 文件
+##### 创建 kube-scheduler 的 systemd unit 文件
 ```
 $ cat > kube-scheduler.service <<EOF
 [Unit]
@@ -685,7 +698,7 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 ```
-##### 启动kube-scheduler
+##### 启动 kube-scheduler
 ```
 $ cp kube-scheduler.service /etc/systemd/system/
 $ systemctl daemon-reload
@@ -694,22 +707,22 @@ $ systemctl start kube-scheduler
 $ systemctl status kube-scheduler
 ```
 ### Build Kubectl
-kubectl默认从`~/.kube/config`配置文件中获取访问kube-apiserver 地址、证书、用户名等信息，需要正确配置该文件才能正常使用kubectl命令。
+kubectl 默认从 `~/.kube/config` 配置文件中获取访问 kube-apiserver 地址、证书、用户名等信息，需要正确配置该文件才能正常使用 kubectl 命令。
 
 #### 环境变量
 ```
 $ source /usr/k8s/bin/env.sh
 $ export KUBE_APISERVER="https://${MASTER_URL}:6443"
 ```
-#### 下载kubectl
+#### 下载 kubectl
 ```
-$ wget https://dl.k8s.io/v1.10.6/kubernetes-client-linux-amd64.tar.gz # 如果服务器上下载不下来，可以想办法下载到本地，然后scp上去即可
+$ wget https://dl.k8s.io/v1.10.6/kubernetes-client-linux-amd64.tar.gz # 如果服务器上下载不下来，可以想办法下载到本地，然后 scp 上去即可
 $ tar -xzvf kubernetes-client-linux-amd64.tar.gz
 $ cp kubernetes/client/bin/kube* /usr/k8s/bin/
 $ chmod +x /usr/k8s/bin/kube*
 ```
-#### 创建admin 证书
-kubectl 与kube-apiserver 的安全端口通信，需要为安全通信提供TLS 证书和密钥。创建admin 证书签名请求：
+#### 创建 admin 证书
+kubectl 与 kube-apiserver 的安全端口通信，需要为安全通信提供 TLS 证书和密钥。创建 admin 证书签名请求：
 ```
 $ cat > admin-csr.json <<EOF
 {
@@ -731,7 +744,7 @@ $ cat > admin-csr.json <<EOF
 }
 EOF
 ```
-生成admin 证书和私钥：
+生成 admin 证书和私钥：
 ```
 $ cfssl gencert -ca=/etc/kubernetes/ssl/ca.pem \
   -ca-key=/etc/kubernetes/ssl/ca-key.pem \
@@ -741,7 +754,7 @@ $ ls admin
 admin.csr  admin-csr.json  admin-key.pem  admin.pem
 $ sudo mv admin*.pem /etc/kubernetes/ssl/
 ```
-#### 创建kubectl kubeconfig 文件
+#### 创建 kubectl kubeconfig 文件
 ```
 # 设置集群参数
 $ kubectl config set-cluster kubernetes \
@@ -761,9 +774,9 @@ $ kubectl config set-context kubernetes \
 # 设置默认上下文
 $ kubectl config use-context kubernetes
 ```
-将`~/.kube/config`文件拷贝到运行kubectl命令的机器的`~/.kube/`目录下去。
+将 `~/.kube/config` 文件拷贝到运行 kubectl 命令的机器的 `~/.kube/` 目录下去。
 
-完成后验证下`master`节点：
+完成后验证下 `master` 节点：
 ```
 # kubectl get componentstatuses
 NAME                 STATUS    MESSAGE             ERROR
@@ -781,13 +794,13 @@ kubernetes Node 节点包含如下组件：
 #### 环境变量
 ```
 # source /usr/k8s/bin/env.sh
-# export KUBE_APISERVER="https://${MASTER_URL}"  // 如果你没有安装`haproxy`的话，还是需要使用6443端口的哦
+# export KUBE_APISERVER="https://${MASTER_URL}"  // 如果你没有安装 `haproxy` 的话，还是需要使用 6443 端口的哦
 # export NODE_IP=192.168.21.9  # 当前部署的节点 IP
 ```
-按照上面的步骤安装配置好flanneld
+按照上面的步骤安装配置好 flanneld
 
 #### 开启路由转发
-修改`/etc/sysctl.conf`文件，添加下面的规则：
+修改 `/etc/sysctl.conf` 文件，添加下面的规则：
 ```
 net.ipv4.ip_forward=1
 net.bridge.bridge-nf-call-iptables=1
@@ -798,11 +811,11 @@ net.bridge.bridge-nf-call-ip6tables=1
 $ sysctl -p
 ```
 
-#### 配置docker
-你可以用二进制或yum install 的方式来安装docker，然后修改docker 的systemd unit 文件：
+#### 配置 docker
+你可以用二进制或 yum install 的方式来安装 docker，然后修改 docker 的 systemd unit 文件：
 
 ```
-$ cat /usr/lib/systemd/system/docker.service  # 用systemctl status docker 命令可查看unit 文件路径
+$ cat /usr/lib/systemd/system/docker.service  # 用 systemctl status docker 命令可查看 unit 文件路径
 [Unit]
 Description=Docker Application Container Engine
 Documentation=https://docs.docker.com
@@ -838,8 +851,8 @@ StartLimitInterval=60s
 [Install]
 WantedBy=multi-user.target
 ```
-`注意关闭防火墙 使用方便点。。然后可以配置国内的docker镜像源`
-#### 启动docker
+` 注意关闭防火墙 使用方便点。。然后可以配置国内的 docker 镜像源 `
+#### 启动 docker
 ```
 $ sudo systemctl daemon-reload
 $ sudo systemctl stop firewalld
@@ -851,16 +864,16 @@ $ sudo systemctl start docker
 
 #### Install Kubelet
 
-kubelet 启动时向kube-apiserver 发送TLS bootstrapping 请求，需要先将bootstrap token 文件中的kubelet-bootstrap 用户赋予system:node-bootstrapper 角色，然后kubelet 才有权限创建认证请求(certificatesigningrequests)：
+kubelet 启动时向 kube-apiserver 发送 TLS bootstrapping 请求，需要先将 bootstrap token 文件中的 kubelet-bootstrap 用户赋予 system:node-bootstrapper 角色，然后 kubelet 才有权限创建认证请求 (certificatesigningrequests)：
 
->kubelet就是运行在Node节点上的，所以这一步安装是在所有的Node节点上，如果你想把你的Master也当做Node节点的话，当然也可以在Master节点上安装的。
+>kubelet 就是运行在 Node 节点上的，所以这一步安装是在所有的 Node 节点上，如果你想把你的 Master 也当做 Node 节点的话，当然也可以在 Master 节点上安装的。
 
 ```
 kubectl create clusterrolebinding kubelet-bootstrap --clusterrole=system:node-bootstrapper --user=kubelet-bootstrap
 ```
 + `--user=kubelet-bootstrap` 是文件 `/etc/kubernetes/token.csv` 中指定的用户名，同时也写入了文件 `/etc/kubernetes/bootstrap.kubeconfig`
 
-##### 创建kubelet bootstapping kubeconfig 文件
+##### 创建 kubelet bootstapping kubeconfig 文件
 ```
 $ # 设置集群参数
 $ kubectl config set-cluster kubernetes \
@@ -881,8 +894,8 @@ $ # 设置默认上下文
 $ kubectl config use-context default --kubeconfig=bootstrap.kubeconfig
 $ mv bootstrap.kubeconfig /etc/kubernetes/
 ```
-##### 创建kubelet 的systemd unit 文件
-`注意`：pod-infra-container-image 这个配置项后面加镜像源 主要是考虑到k8s官方源国内访问不了, 需要单独去配置 我这里用的是私有源
+##### 创建 kubelet 的 systemd unit 文件
+` 注意 `：pod-infra-container-image 这个配置项后面加镜像源 主要是考虑到 k8s 官方源国内访问不了, 需要单独去配置 我这里用的是私有源
 ```
 $ sudo mkdir /var/lib/kubelet # 必须先创建工作目录
 $ cat > kubelet.service <<EOF
@@ -918,7 +931,7 @@ WantedBy=multi-user.target
 EOF
 ```
 
-##### 启动kubelet
+##### 启动 kubelet
 ```
 $ sudo cp kubelet.service /etc/systemd/system/kubelet.service
 $ sudo systemctl daemon-reload
@@ -927,7 +940,7 @@ $ sudo systemctl start kubelet
 $ systemctl status kubelet
 ```
 
-##### 通过kubelet 的TLS 证书请求
+##### 通过 kubelet 的 TLS 证书请求
 ```
 $ kubectl get csr
 NAME                                                   AGE       REQUESTOR           CONDITION
@@ -935,7 +948,7 @@ node-csr--k3G2G1EoM4h9w1FuJRjJjfbIPNxa551A8TZfW9dG-g   2m        kubelet-bootstr
 $ kubectl get nodes
 No resources found.
 ```
-通过CSR 请求：
+通过 CSR 请求：
 ```
 $ kubectl certificate approve node-csr--k3G2G1EoM4h9w1FuJRjJjfbIPNxa551A8TZfW9dG-g
 certificatesigningrequest "node-csr--k3G2G1EoM4h9w1FuJRjJjfbIPNxa551A8TZfW9dG-g" approved
@@ -943,7 +956,7 @@ $ kubectl get nodes
 NAME            STATUS    ROLES     AGE       VERSION
 192.168.21.9   Ready     <none>    48s       v1.10.6
 ```
-自动生成了kubelet kubeconfig 文件和公私钥：
+自动生成了 kubelet kubeconfig 文件和公私钥：
 ```
 $ ls -l /etc/kubernetes/kubelet.kubeconfig
 -rw------- 1 root root 2280 Nov  7 10:26 /etc/kubernetes/kubelet.kubeconfig
@@ -953,8 +966,8 @@ $ ls -l /etc/kubernetes/ssl/kubelet*
 -rw-r--r-- 1 root root 1115 Nov  7 10:16 /etc/kubernetes/ssl/kubelet.crt
 -rw------- 1 root root 1675 Nov  7 10:16 /etc/kubernetes/ssl/kubelet.key
 ```
-#### Install Kube-proxy 
-##### 创建kube-proxy 证书签名请求：
+#### Install Kube-proxy
+##### 创建 kube-proxy 证书签名请求：
 ```
 $ cat > kube-proxy-csr.json <<EOF
 {
@@ -976,7 +989,7 @@ $ cat > kube-proxy-csr.json <<EOF
 }
 EOF
 ```
-##### 生成kube-proxy 客户端证书和私钥
+##### 生成 kube-proxy 客户端证书和私钥
 ```
 $ cfssl gencert -ca=/etc/kubernetes/ssl/ca.pem \
   -ca-key=/etc/kubernetes/ssl/ca-key.pem \
@@ -986,7 +999,7 @@ $ ls kube-proxy*
 kube-proxy.csr  kube-proxy-csr.json  kube-proxy-key.pem  kube-proxy.pem
 $ mv kube-proxy*.pem /etc/kubernetes/ssl/
 ```
-##### 创建kube-proxy kubeconfig 文件
+##### 创建 kube-proxy kubeconfig 文件
 ```
 $ # 设置集群参数
 $ kubectl config set-cluster kubernetes \
@@ -1010,7 +1023,7 @@ $ kubectl config use-context default --kubeconfig=kube-proxy.kubeconfig
 $ mv kube-proxy.kubeconfig /etc/kubernetes/
 ```
 
-##### 创建kube-proxy 的systemd unit 文件
+##### 创建 kube-proxy 的 systemd unit 文件
 ```
 $ sudo mkdir -p /var/lib/kube-proxy # 必须先创建工作目录
 $ cat > kube-proxy.service <<EOF
@@ -1037,7 +1050,7 @@ WantedBy=multi-user.target
 EOF
 ```
 
-##### 启动kube-proxy
+##### 启动 kube-proxy
 ```
 $ sudo cp kube-proxy.service /etc/systemd/system/
 $ sudo systemctl daemon-reload
@@ -1047,7 +1060,7 @@ $ systemctl status kube-proxy
 ```
 
 #### 验证集群功能
-定义yaml 文件：（将下面内容保存为：nginx-ds.yaml）
+定义 yaml 文件：（将下面内容保存为：nginx-ds.yaml）
 
 ```
 apiVersion: v1
@@ -1089,7 +1102,7 @@ $ kubectl create -f nginx-ds.yml
 service "nginx-ds" created
 daemonset "nginx-ds" created
 ```
-执行下面的命令查看Pod 和SVC：
+执行下面的命令查看 Pod 和 SVC：
 ```
 $ kubectl get pods -o wide
 NAME             READY     STATUS    RESTARTS   AGE       IP           NODE
@@ -1196,7 +1209,7 @@ spec:
       - name: coredns
         image: coredns/coredns:1.1.1
         imagePullPolicy: IfNotPresent
-        args: [ "-conf", "/etc/coredns/Corefile" ]
+        args: ["-conf", "/etc/coredns/Corefile"]
         volumeMounts:
         - name: config-volume
           mountPath: /etc/coredns
@@ -1252,17 +1265,17 @@ spec:
     protocol: TCP
 ```
 
-这个文件在所在github地址：`https://github.com/kubernetes/kubernetes/tree/release-1.10/cluster/addons/dns`
+这个文件在所在 github 地址：`https://github.com/kubernetes/kubernetes/tree/release-1.10/cluster/addons/dns`
 
 需要对这个文件做一些改动：
->+ 61行 kubernetes $DNS_DOMAIN in-addr.arpa ip6.arpa 中的$DNS_DOMAIN改为cluster.local
->+ 153行 clusterIP: $DNS_SERVER_IP 中$DNS_SERVER_IP 改为全局变量 CLUSTER_DNS_SVC_IP的值
+>+ 61 行 kubernetes $DNS_DOMAIN in-addr.arpa ip6.arpa 中的 $DNS_DOMAIN 改为 cluster.local
+>+ 153 行 clusterIP: $DNS_SERVER_IP 中 $DNS_SERVER_IP 改为全局变量 CLUSTER_DNS_SVC_IP 的值
 
-##### 创建dns
+##### 创建 dns
 ```
 kubectl create -f coredns.yaml
 ```
-#### Install Heapster 
+#### Install Heapster
 yaml 创建一下就可以了
 ```
 kubectl create -f https://raw.githubusercontent.com/kubernetes/heapster/master/deploy/kube-config/influxdb/grafana.yaml
@@ -1270,4 +1283,4 @@ kubectl create -f https://raw.githubusercontent.com/kubernetes/heapster/master/d
 kubectl create -f https://raw.githubusercontent.com/kubernetes/heapster/master/deploy/kube-config/influxdb/influxdb.yaml
 kubectl create -f https://raw.githubusercontent.com/kubernetes/heapster/master/deploy/kube-config/rbac/heapster-rbac.yaml
 ```
-在国内可能会失败，因为访问不到k8s镜像源。这样需要把yaml下载到本地, 然后修改image后面的选项。
+在国内可能会失败，因为访问不到 k8s 镜像源。这样需要把 yaml 下载到本地, 然后修改 image 后面的选项。
