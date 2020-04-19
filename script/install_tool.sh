@@ -2,7 +2,7 @@
 
 echo "202.182.121.61 k8s-api.virtual.local k8s-api" >> /etc/hosts
 mkdir -p /usr/k8s/bin
-cp env.sh /usr/k8s/bin
+cp ./env/env.sh /usr/k8s/bin
 
 #install cfssl
 wget https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
